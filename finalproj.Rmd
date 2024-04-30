@@ -1,0 +1,109 @@
+---
+title: "Final"
+author: "Malvika Nair"
+date: "2024-04-24"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading in the data and pertinent packages
+
+
+```{r loadin}
+library(tidyverse)
+library(caret)
+library(rpart.plot)
+library(ggbiplot)
+library(dplyr)
+library(stats)
+library(factoextra)
+library(cluster)
+
+load("exposome.RData")
+col_rq <- codebook %>% 
+  # Includes these families: Air Pollution, Built Environment, Water DBP's, Traffic, Noise, Natural Spaces,
+  # Meteorlogical
+  filter(domain == "Outdoor exposures" & period == "Pregnancy") %>%
+  select(variable_name)
+
+rqexposome <- exposome %>% select("ID", all_of(pull(col_rq, variable_name)))
+rqphenotype <- phenotype %>% select("ID", "hs_asthma")
+
+studydata<-merge(rqexposome,rqphenotype,by="ID")
+var.names <-c("id", "absexposure", "no2exposure","pm10exposure", "pm25exposure", "buslineaccess",
+              "bustopaccess", "buildingdensity", "connectivitydensity", "facilitydensity", "facilitytypes",
+              "landusewalkabilityshannon", "populationdensity", "walkabilityindex", "humidityavg",
+              "airpressureavg","avgtemperature","bluespace", "greenspace", "avgndvivalue", "noiselevel",
+              "distancetoroad", "trafficload", "trafficdensity", "brominatedwater", "chloroform",
+              "trihalomethanes", "asthma")
+colnames(studydata) <- var.names
+studydata <- studydata %>% mutate(asthma = as.factor(asthma),
+                                  asthma = fct_recode(asthma, "Diagnosed with Asthma" = "1", 
+                                                      "Not Diagnosed" = "0"),
+                                  buslineaccess = as.factor(buslineaccess),
+                                  buslineaccess = fct_recode(buslineaccess, "Yes" = "1", "No" = "0"),
+                                  bluespace = as.factor(bluespace),
+                                  bluespace = fct_recode(bluespace, "Yes" = "1", "No" = "0"),
+                                  greenspace = as.factor(greenspace),
+                                  greenspace = fct_recode(greenspace, "Yes" = "1", "No" = "0"))
+studydata$id<-NULL
+
+studydata.predictors <- studydata %>% select_if(is.numeric)
+correlations <- cor(studydata.predictors, use = "complete.obs")
+high.correlations <- findCorrelation(correlations, cutoff = 0.4)
+new.data.low.corr <- studydata[, -high.correlations]
+
+```
+
+## Random Forest
+
+
+```{r randomforest}
+set.seed(123)
+training.data<-new.data.low.corr$asthma%>% createDataPartition(p=0.7, list=F)
+train.data<-new.data.low.corr[training.data, ]
+test.data<-new.data.low.corr[-training.data, ] 
+
+training.data2 <-studydata$asthma %>% createDataPartition(p=0.7, list=F)
+train.data2 <- studydata[training.data2, ]
+test.data2 <-studydata[-training.data2, ]
+
+control.settings<-trainControl(method="cv", number=10)
+
+#Trying three different values of mtry
+mtry.vals<-c(ncol(train.data)-1, sqrt(ncol(train.data)-1), 0.5*ncol(train.data)-1)
+mtry.grid<-expand.grid(.mtry=round(mtry.vals))
+
+rf.asthma.1<-train(asthma ~., data=train.data, method="rf", metric="Accuracy", tuneGrid=mtry.grid, trControl=control.settings, ntree=100)
+
+confusionMatrix(rf.asthma.1)
+rf.asthma.1$results
+rf.asthma.1$bestTune
+rf.asthma.1$finalModel
+
+varImp(rf.asthma.1)
+plot(varImp(rf.asthma.1))
+
+#varImpPlot(rf.asthma.1$finalModel)
+
+#Trying three different values of mtry
+mtry.vals<-c(ncol(train.data2)-1, sqrt(ncol(train.data2)-1), 0.5*ncol(train.data2)-1)
+mtry.grid<-expand.grid(.mtry=round(mtry.vals))
+
+rf.asthma.2<-train(asthma ~., data=train.data2, method="rf", metric="Accuracy", tuneGrid=mtry.grid, trControl=control.settings, ntree=100)
+
+confusionMatrix(rf.asthma.2)
+rf.asthma.2$results
+rf.asthma.2$bestTune
+rf.asthma.2$finalModel
+
+varImp(rf.asthma.2)
+plot(varImp(rf.asthma.2))
+
+#varImpPlot(rf.asthma.2$finalModel)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
